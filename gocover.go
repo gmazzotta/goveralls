@@ -98,7 +98,7 @@ func mergeTwoProfBlock(left, right []cover.ProfileBlock) []cover.ProfileBlock {
 }
 
 // toSF converts profiles to sourcefiles for coveralls.
-func toSF(profs []*cover.Profile) ([]*SourceFile, error) {
+func toSF(moduleName string, profs []*cover.Profile) ([]*SourceFile, error) {
 	var rv []*SourceFile
 	for _, prof := range profs {
 		// start mapping all blocks
@@ -122,8 +122,7 @@ func toSF(profs []*cover.Profile) ([]*SourceFile, error) {
 		}
 
 		sf := &SourceFile{
-			Name: prof.FileName, //getCoverallsSourceFileName(path),
-			//Source:   string(fb),
+			Name:     strings.TrimPrefix(prof.FileName, moduleName+"/"),
 			Coverage: coverage,
 		}
 
@@ -133,7 +132,7 @@ func toSF(profs []*cover.Profile) ([]*SourceFile, error) {
 	return rv, nil
 }
 
-func parseCover(fn string) ([]*SourceFile, error) {
+func parseCover(moduleName, fn string) ([]*SourceFile, error) {
 	var pfss [][]*cover.Profile
 	for _, p := range strings.Split(fn, ",") {
 		profs, err := cover.ParseProfiles(p)
@@ -143,7 +142,7 @@ func parseCover(fn string) ([]*SourceFile, error) {
 		pfss = append(pfss, profs)
 	}
 
-	sourceFiles, err := toSF(mergeProfs(pfss))
+	sourceFiles, err := toSF(moduleName, mergeProfs(pfss))
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	_ "crypto/sha512"
 	"crypto/tls"
 	"encoding/json"
@@ -148,7 +149,34 @@ func getCoverage() ([]*SourceFile, error) {
 		return nil, errors.New("no cover profile files provided")
 	}
 
-	return parseCover(*coverprof)
+	// find the module name
+	b, err := ioutil.ReadFile("go.mod")
+	if err != nil {
+		return nil, err
+	}
+
+	var moduleName string
+	for _, lineBytes := range bytes.Split(b, []byte{'\n'}) {
+		line := string(lineBytes)
+
+		if !strings.HasPrefix(line, "module") {
+			continue
+		}
+
+		s := strings.SplitN(line, " ", 2)
+		if len(s) != 2 {
+			break
+		}
+
+		moduleName = s[1]
+		break
+	}
+
+	if moduleName == "" {
+		return nil, errors.New("cannot find module name in go.mod")
+	}
+
+	return parseCover(moduleName, *coverprof)
 }
 
 var vscDirs = []string{".git", ".hg", ".bzr", ".svn"}
