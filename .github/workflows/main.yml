@@ -32,15 +32,15 @@ jobs:
 
       - uses: actions/checkout@v2
         with:
-          path: src/github.com/mattn/goveralls
+          path: src/github.com/gmazzotta/goveralls
       - name: build
         run: |
           go get ./...
           go install .
-        working-directory: src/github.com/mattn/goveralls
+        working-directory: src/github.com/gmazzotta/goveralls
       - name: test
         run: goveralls -service=github -parallel -flagname="Unit-${{ matrix.os }}-Go-${{ matrix.go }}"
-        working-directory: src/github.com/mattn/goveralls
+        working-directory: src/github.com/gmazzotta/goveralls
         env:
           COVERALLS_TOKEN: ${{ github.token }}
 
@@ -55,6 +55,6 @@ jobs:
       - uses: actions/checkout@v2
       - name: finish
         run: |
-          go run github.com/mattn/goveralls -parallel-finish
+          go run github.com/gmazzotta/goveralls -parallel-finish
         env:
           COVERALLS_TOKEN: ${{ github.token }}
