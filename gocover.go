@@ -118,7 +118,10 @@ func toSF(moduleName string, profs []*cover.Profile) ([]*SourceFile, error) {
 		coverage := make([]interface{}, maxLineNo)
 		for i := 0; i < maxLineNo; i++ {
 			// adjust to Go line offset (+1)
-			coverage[i] = coverageByLine[i+1]
+			// do not set '0's if line is unindexed in the lookup
+			if c, ok := coverageByLine[i+1]; ok {
+				coverage[i] = c
+			}
 		}
 
 		sf := &SourceFile{
