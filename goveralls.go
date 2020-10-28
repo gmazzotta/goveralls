@@ -6,18 +6,15 @@
 package main
 
 import (
-	"bytes"
 	_ "crypto/sha512"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"go/build"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,9 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/tools/cover"
-	"golang.org/x/tools/go/buildutil"
 )
 
 /*
@@ -54,7 +48,7 @@ var (
 	verbose       = flag.Bool("v", false, "Pass '-v' argument to 'go test' and output to stdout")
 	race          = flag.Bool("race", false, "Pass '-race' argument to 'go test'")
 	debug         = flag.Bool("debug", false, "Enable debug output")
-	coverprof     = flag.String("coverprofile", "", "If supplied, use a go cover profile (comma separated)")
+	coverprof     = flag.String("coverprofile", "", "Must be supplied; a comma-separated list of of go cover profile files")
 	covermode     = flag.String("covermode", "count", "sent as covermode argument to go test")
 	repotoken     = flag.String("repotoken", os.Getenv("COVERALLS_TOKEN"), "Repository Token on coveralls")
 	reponame      = flag.String("reponame", "", "Repository name")
@@ -73,9 +67,10 @@ var (
 	parallelFinish = flag.Bool("parallel-finish", false, "finish parallel test")
 )
 
+/*
 func init() {
 	flag.Var((*buildutil.TagsFlag)(&build.Default.BuildTags), "tags", buildutil.TagsFlagDoc)
-}
+}*/
 
 // usage supplants package flag's Usage variable
 var usage = func() {
@@ -149,68 +144,11 @@ func getPkgs(pkg string) ([]string, error) {
 }
 
 func getCoverage() ([]*SourceFile, error) {
-	if *coverprof != "" {
-		return parseCover(*coverprof)
+	if *coverprof == "" {
+		return nil, errors.New("no cover profile files provided")
 	}
 
-	// pkgs is packages to run tests and get coverage.
-	pkgs, err := getPkgs(*pkg)
-	if err != nil {
-		return nil, err
-	}
-	coverpkg := fmt.Sprintf("-coverpkg=%s", strings.Join(pkgs, ","))
-	var pfss [][]*cover.Profile
-	for _, line := range pkgs {
-		f, err := ioutil.TempFile("", "goveralls")
-		if err != nil {
-			return nil, err
-		}
-		f.Close()
-		cmd := exec.Command("go")
-		outBuf := new(bytes.Buffer)
-		cmd.Stdout = outBuf
-		cmd.Stderr = outBuf
-		coverm := *covermode
-		if *race {
-			coverm = "atomic"
-		}
-		args := []string{"go", "test", "-covermode", coverm, "-coverprofile", f.Name(), coverpkg}
-		if *verbose {
-			args = append(args, "-v")
-			cmd.Stdout = os.Stdout
-		}
-		if *race {
-			args = append(args, "-race")
-		}
-		args = append(args, extraFlags...)
-		args = append(args, line)
-		cmd.Args = args
-
-		if *show {
-			fmt.Println("goveralls:", line)
-		}
-		err = cmd.Run()
-		if err != nil {
-			return nil, fmt.Errorf("%v: %v", err, outBuf.String())
-		}
-
-		pfs, err := cover.ParseProfiles(f.Name())
-		if err != nil {
-			return nil, err
-		}
-		err = os.Remove(f.Name())
-		if err != nil {
-			return nil, err
-		}
-		pfss = append(pfss, pfs)
-	}
-
-	sourceFiles, err := toSF(mergeProfs(pfss))
-	if err != nil {
-		return nil, err
-	}
-
-	return sourceFiles, nil
+	return parseCover(*coverprof)
 }
 
 var vscDirs = []string{".git", ".hg", ".bzr", ".svn"}
@@ -233,52 +171,6 @@ func getCoverallsSourceFileName(name string) string {
 		name = strings.TrimPrefix(name, dir+string(os.PathSeparator))
 	}
 	return filepath.ToSlash(name)
-}
-
-// processParallelFinish notifies coveralls that all jobs are completed
-// ref. https://docs.coveralls.io/parallel-build-webhook
-func processParallelFinish(jobID, token string) error {
-	var name string
-	if reponame != nil && *reponame != "" {
-		name = *reponame
-	} else if s := os.Getenv("GITHUB_REPOSITORY"); s != "" {
-		name = s
-	}
-
-	params := make(url.Values)
-	params.Set("repo_token", token)
-	params.Set("repo_name", name)
-	params.Set("payload[build_num]", jobID)
-	params.Set("payload[status]", "done")
-	res, err := http.PostForm(*endpoint+"/webhook", params)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("Unable to read response body from coveralls: %s", err)
-	}
-
-	if res.StatusCode >= http.StatusInternalServerError && *shallow {
-		fmt.Println("coveralls server failed internally")
-		return nil
-	}
-
-	if res.StatusCode != 200 {
-		return fmt.Errorf("Bad response status from coveralls: %d\n%s", res.StatusCode, bodyBytes)
-	}
-
-	var response WebHookResponse
-	if err = json.Unmarshal(bodyBytes, &response); err != nil {
-		return fmt.Errorf("Unable to unmarshal response JSON from coveralls: %s\n%s", err, bodyBytes)
-	}
-
-	if !response.Done {
-		return fmt.Errorf("jobs are not completed:\n%s", bodyBytes)
-	}
-
-	return nil
 }
 
 func process() error {
@@ -454,41 +346,7 @@ func process() error {
 		log.Printf("Posting data: %s", b)
 	}
 
-	b, err := json.Marshal(j)
-	if err != nil {
-		return err
-	}
-
-	params := make(url.Values)
-	params.Set("json", string(b))
-	res, err := http.PostForm(*endpoint+"/api/v1/jobs", params)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("Unable to read response body from coveralls: %s", err)
-	}
-
-	if res.StatusCode >= http.StatusInternalServerError && *shallow {
-		fmt.Println("coveralls server failed internally")
-		return nil
-	}
-
-	if res.StatusCode != 200 {
-		return fmt.Errorf("Bad response status from coveralls: %d\n%s", res.StatusCode, bodyBytes)
-	}
-	var response Response
-	if err = json.Unmarshal(bodyBytes, &response); err != nil {
-		return fmt.Errorf("Unable to unmarshal response JSON from coveralls: %s\n%s", err, bodyBytes)
-	}
-	if response.Error {
-		return errors.New(response.Message)
-	}
-	fmt.Println(response.Message)
-	fmt.Println(response.URL)
-	return nil
+	return submitCoverallsJob(j)
 }
 
 func getGithubEvent() map[string]interface{} {
